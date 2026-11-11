@@ -138,16 +138,34 @@ assert_commands
 smoke_app 11 11.0.100
 checkpoint 'Baseline SDK11 and dnx work'
 
+snapshot() {
+  python3 - "$1" "$report_dir" "$dotnet_root" "$PACKAGE_ARCH" <<'PYTHON'
+from pathlib import Path
+import hashlib, json, plistlib, subprocess, sys
+name, report, root, arch = sys.argv[1:]
+path = Path(root) / 'dnx'
+receipt = subprocess.run(['pkgutil', '--pkg-info-plist', f'com.microsoft.dotnet.sharedhost.component.osx.{arch}'], capture_output=True)
+info = plistlib.loads(receipt.stdout) if receipt.returncode == 0 else {}
+data = {'stage': name, 'dnx_exists': path.exists(), 'dnx_is_symlink': path.is_symlink(), 'dnx_sha256': hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None, 'sharedhost_receipt_version': info.get('pkg-version'), 'sdk_list': subprocess.run([str(Path(root) / 'dotnet'), '--list-sdks'], capture_output=True, text=True).stdout}
+(Path(report) / f'{name}.json').write_text(json.dumps(data, indent=2) + '\n')
+print(json.dumps(data), flush=True)
+PYTHON
+}
+
 for older in 8 9; do
+  snapshot "sdk${older}-before-install"
   shasum -a 256 "$dotnet_root/dnx" > "$report_dir/dnx-before-${older}.sha256"
   brew install --cask "dotnet-sdk@${older}"
+  snapshot "sdk${older}-after-install"
   "$dotnet_command" --list-sdks
   pkgutil --pkgs="com.microsoft.dotnet.*${older}.0*" > "$report_dir/receipts-sdk${older}.txt"
   brew uninstall --cask "dotnet-sdk@${older}"
-  shasum -a 256 --check "$report_dir/dnx-before-${older}.sha256"
+  snapshot "sdk${older}-after-uninstall"
   assert_sdk 11.0.100
+  smoke_app 11 11.0.100
+  checkpoint "Recorded dnx and sharedhost receipt immediately after SDK${older} installation and uninstallation"
+  brew reinstall --cask dotnet-sdk
   assert_commands
-  checkpoint "Unmodified SDK${older} uninstall preserves SDK11 and dnx"
 done
 
 # Remove only the proposed preservation steps from the test copy.
@@ -160,12 +178,14 @@ end = s.index('  uninstall pkgutil:', start)
 Path(sys.argv[2]).write_text(s[:start] + s[end:])
 PYTHON
 brew install --cask dotnet-sdk@10
+snapshot 'sdk10-without-hooks-after-install'
 assert_sdk 10.0.404
 assert_commands
 pkgutil --pkgs='com.microsoft.dotnet.*10.0*' > "$report_dir/receipts-sdk10.txt"
 pkgutil --files "com.microsoft.dotnet.dev.10.0.404.component.osx.${PACKAGE_ARCH:?}" > "$report_dir/files-sdk10.txt"
 pkgutil --files "com.microsoft.dotnet.sharedhost.component.osx.${PACKAGE_ARCH}" > "$report_dir/files-sharedhost.txt"
 brew uninstall --cask dotnet-sdk@10
+snapshot 'sdk10-without-hooks-after-uninstall'
 assert_no_sdk 10.0.404
 assert_sdk 11.0.100
 [[ ! -e "$dotnet_root/dnx" ]]
@@ -180,8 +200,10 @@ cp "$candidate_dir/dotnet-sdk@10.rb" "$cask_tap/Casks/d/dotnet-sdk@10.rb"
 brew style --cask dotnet-sdk@10
 brew audit --cask --online --new dotnet-sdk@10
 brew install --cask dotnet-sdk@10
+snapshot 'sdk10-with-temp-hooks-after-install'
 smoke_app 10 10.0.404
 remove_versioned_sdk
+snapshot 'sdk10-with-temp-hooks-after-uninstall'
 checkpoint 'GREEN: exact temporary-storage preservation keeps dnx and SDK11 working'
 brew uninstall --cask dotnet-sdk
 assert_uninstalled
