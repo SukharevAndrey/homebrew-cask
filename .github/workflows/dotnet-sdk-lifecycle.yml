@@ -27,8 +27,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-26
-            arch: arm64
           - runner: macos-26-intel
             arch: x86_64
     env:
@@ -39,6 +37,12 @@ jobs:
       DOTNET_NOLOGO: 1
       BASELINE_CASK_COMMIT: 015031b030602da5aef548b3e2d1b78b0449df62
     steps:
+      - name: Avoid unrelated Azure CLI migration in the runner image
+        run: |
+          if brew list --formula | grep -Fxq azure-cli; then
+            brew uninstall --formula --ignore-dependencies azure-cli
+          fi
+
       - name: Set up Homebrew
         uses: Homebrew/actions/setup-homebrew@c262868c096d909fc278daa87ed9772967331ea3 # 2026.11.02.1
         timeout-minutes: 10
