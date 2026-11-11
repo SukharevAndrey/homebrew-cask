@@ -131,52 +131,58 @@ while IFS= read -r receipt; do
 done < "$report_dir/preinstalled-receipts.txt"
 checkpoint 'Disposable runner prepared without preinstalled SDKs'
 
-brew style --cask dotnet-sdk dotnet-sdk@10
-brew audit --cask --online dotnet-sdk
-brew audit --cask --new dotnet-sdk@10
-checkpoint 'Style and online audits passed'
-
+# Compare the existing versioned packages and reproduce the new SDK10 collision.
 brew install --cask dotnet-sdk
 assert_sdk 11.0.100
 assert_commands
 smoke_app 11 11.0.100
-checkpoint 'Fresh .NET 11 installation runs an application and dnx'
+checkpoint 'Baseline SDK11 and dnx work'
 
+for older in 8 9; do
+  shasum -a 256 "$dotnet_root/dnx" > "$report_dir/dnx-before-${older}.sha256"
+  brew install --cask "dotnet-sdk@${older}"
+  "$dotnet_command" --list-sdks
+  pkgutil --pkgs="com.microsoft.dotnet.*${older}.0*" > "$report_dir/receipts-sdk${older}.txt"
+  brew uninstall --cask "dotnet-sdk@${older}"
+  shasum -a 256 --check "$report_dir/dnx-before-${older}.sha256"
+  assert_sdk 11.0.100
+  assert_commands
+  checkpoint "Unmodified SDK${older} uninstall preserves SDK11 and dnx"
+done
+
+# Remove only the proposed preservation steps from the test copy.
+python3 - "$candidate_dir/dotnet-sdk@10.rb" "$cask_tap/Casks/d/dotnet-sdk@10.rb" <<'PYTHON'
+from pathlib import Path
+import sys
+s = Path(sys.argv[1]).read_text()
+start = s.index('  uninstall_preflight_steps do')
+end = s.index('  uninstall pkgutil:', start)
+Path(sys.argv[2]).write_text(s[:start] + s[end:])
+PYTHON
 brew install --cask dotnet-sdk@10
 assert_sdk 10.0.404
-assert_sdk 11.0.100
-smoke_app 10 10.0.404
-smoke_app 11 11.0.100
-checkpoint '.NET 10 and 11 work side by side'
-
-remove_versioned_sdk
-checkpoint 'Removing .NET 10 preserves .NET 11 and dnx'
-
-brew install --cask dotnet-sdk@10
-smoke_app 10 10.0.404
-remove_versioned_sdk
-brew uninstall --cask dotnet-sdk
-assert_uninstalled
-checkpoint 'Reinstallation and complete uninstallation passed'
-
-git show "${BASELINE_CASK_COMMIT:?}:Casks/d/dotnet-sdk.rb" > "$cask_tap/Casks/d/dotnet-sdk.rb"
-brew install --cask dotnet-sdk
-assert_sdk 10.0.404
-smoke_app 10 10.0.404
-checkpoint 'Previous stable .NET 10 baseline installed'
-
-cp "$candidate_dir/dotnet-sdk.rb" "$cask_tap/Casks/d/dotnet-sdk.rb"
-brew upgrade --cask dotnet-sdk
-assert_sdk 11.0.100
+assert_commands
+pkgutil --pkgs='com.microsoft.dotnet.*10.0*' > "$report_dir/receipts-sdk10.txt"
+pkgutil --files "com.microsoft.dotnet.dev.10.0.404.component.osx.${PACKAGE_ARCH:?}" > "$report_dir/files-sdk10.txt"
+pkgutil --files "com.microsoft.dotnet.sharedhost.component.osx.${PACKAGE_ARCH}" > "$report_dir/files-sharedhost.txt"
+brew uninstall --cask dotnet-sdk@10
 assert_no_sdk 10.0.404
-assert_commands
+assert_sdk 11.0.100
+[[ ! -e "$dotnet_root/dnx" ]]
+[[ -L "$brew_prefix/bin/dnx" ]]
 smoke_app 11 11.0.100
-checkpoint 'Upgrade of the stable cask from .NET 10 to 11 passed'
+checkpoint 'RED: removing SDK10 without preservation deletes dnx and leaves its command link dangling'
 
+# Restore a pristine shared host, then test the exact maintainer suggestion.
+brew reinstall --cask dotnet-sdk
+assert_commands
+cp "$candidate_dir/dotnet-sdk@10.rb" "$cask_tap/Casks/d/dotnet-sdk@10.rb"
+brew style --cask dotnet-sdk@10
+brew audit --cask --online --new dotnet-sdk@10
 brew install --cask dotnet-sdk@10
 smoke_app 10 10.0.404
-smoke_app 11 11.0.100
 remove_versioned_sdk
+checkpoint 'GREEN: exact temporary-storage preservation keeps dnx and SDK11 working'
 brew uninstall --cask dotnet-sdk
 assert_uninstalled
-checkpoint 'Versioned SDK and cleanup also passed after the upgrade'
+checkpoint 'Complete cleanup passed'

@@ -27,8 +27,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - runner: macos-26
+            arch: arm64
+            package_arch: arm64
           - runner: macos-26-intel
             arch: x86_64
+            package_arch: x64
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_ANALYTICS: 1
@@ -68,6 +72,7 @@ jobs:
       - name: Verify installation, upgrade and uninstallation
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
+          PACKAGE_ARCH: ${{ matrix.package_arch }}
         run: bash developer/verify-dotnet-sdk-lifecycle.sh
 
       - name: Upload test results

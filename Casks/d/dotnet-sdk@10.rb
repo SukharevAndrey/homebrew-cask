@@ -34,13 +34,13 @@ cask "dotnet-sdk@10" do
 
   uninstall_preflight_steps do
     if_path_exists "/usr/local/share/dotnet/dnx" do
-      copy "/usr/local/share/dotnet/dnx", "dnx"
+      copy "/usr/local/share/dotnet/dnx", "dnx", target_base: :temp
     end
   end
 
   uninstall_postflight_steps do
-    if_path_exists "dnx" do
-      run "/bin/cp", args: ["{{staged_path}}/dnx", "/usr/local/share/dotnet/dnx"], sudo: true
+    if_path_exists "dnx", base: :temp do
+      run "/bin/cp", args: ["{{temp}}/dnx", "/usr/local/share/dotnet/dnx"], sudo: true
     end
   end
 
