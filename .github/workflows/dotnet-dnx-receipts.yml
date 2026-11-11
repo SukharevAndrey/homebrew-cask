@@ -1,0 +1,81 @@
+name: .NET dnx receipts
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - verify-dotnet-sdk-lifecycle
+    paths:
+      - .github/workflows/dotnet-dnx-receipts.yml
+      - developer/verify-dotnet-dnx-receipts.sh
+      - Casks/d/dotnet-sdk*.rb
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dotnet-dnx-receipts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lifecycle:
+    if: github.repository == 'SukharevAndrey/homebrew-cask'
+    name: macOS 26 (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+            package_arch: arm64
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_ANALYTICS: 1
+      HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+      BASELINE_CASK_COMMIT: 015031b030602da5aef548b3e2d1b78b0449df62
+    steps:
+      - name: Check out test branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 8
+          persist-credentials: false
+
+      - name: Avoid unrelated Azure CLI migration in the runner image
+        run: |
+          if brew list --formula | grep -Fxq azure-cli; then
+            brew uninstall --formula --ignore-dependencies azure-cli
+          fi
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@c262868c096d909fc278daa87ed9772967331ea3 # 2026.11.02.1
+        timeout-minutes: 10
+        with:
+          core: false
+          cask: false
+
+      - name: Prepare current tap files without their history
+        run: |
+          for tap in cask; do
+            tap_path="$(brew --repository)/Library/Taps/homebrew/homebrew-${tap}"
+            if [[ ! -d "$tap_path" ]]; then
+              git clone --depth=1 "https://github.com/Homebrew/homebrew-${tap}.git" "$tap_path"
+            fi
+          done
+
+      - name: Inspect sharedhost receipts and final cleanup
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          PACKAGE_ARCH: ${{ matrix.package_arch }}
+        run: bash developer/verify-dotnet-dnx-receipts.sh
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dotnet-dnx-receipts-${{ matrix.arch }}
+          path: ${{ runner.temp }}/dotnet-lifecycle-results
+          if-no-files-found: warn
