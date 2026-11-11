@@ -1,0 +1,65 @@
+name: .NET SDK lifecycle
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - verify-dotnet-sdk-lifecycle
+    paths:
+      - .github/workflows/dotnet-sdk-lifecycle.yml
+      - developer/verify-dotnet-sdk-lifecycle.sh
+      - Casks/d/dotnet-sdk*.rb
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dotnet-sdk-lifecycle-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  lifecycle:
+    if: github.repository == 'SukharevAndrey/homebrew-cask'
+    name: macOS 26 (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_ANALYTICS: 1
+      HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+      BASELINE_CASK_COMMIT: 015031b030602da5aef548b3e2d1b78b0449df62
+    steps:
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@c262868c096d909fc278daa87ed9772967331ea3 # 2026.11.02.1
+        with:
+          core: true
+          cask: true
+
+      - name: Check out test branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 8
+          persist-credentials: false
+
+      - name: Verify installation, upgrade and uninstallation
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: bash developer/verify-dotnet-sdk-lifecycle.sh
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dotnet-sdk-lifecycle-${{ matrix.arch }}
+          path: ${{ runner.temp }}/dotnet-lifecycle-results
+          if-no-files-found: warn
